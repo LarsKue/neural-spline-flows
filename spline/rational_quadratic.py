@@ -22,7 +22,7 @@ class RationalQuadraticSpline(_BaseCouplingBlock):
         super().__init__(dims_in, dims_c, clamp=0.0, clamp_activation=lambda u: u, split_len=split_len)
 
         # for each input we have the following parameters (constraints):
-        # 1. the domain width B (positive)
+        # 1. the domain half-width B (positive)
         # 2. the relative width of each bin (positive, sum to 1)
         # 3. the relative height of each bin (positive, sum to 1)
         # 4. the derivative at the edge of each inner bin (positive)
@@ -59,7 +59,8 @@ class RationalQuadraticSpline(_BaseCouplingBlock):
 
         # define activation for B such that if the network predicts 0, we get B = 1
         # we use a shifted softplus
-        B = F.softplus(B + np.log(np.e - 1))
+        B = torch.exp(-torch.atan(B))
+        # B = F.softplus(B + np.log(np.e - 1))
 
         widths = F.softmax(widths, dim=-1)
         heights = F.softmax(heights, dim=-1)
@@ -79,7 +80,8 @@ class RationalQuadraticSpline(_BaseCouplingBlock):
         ys = 2 * B * ys - B
 
         # shifted softplus for network 0 -> delta = 1
-        deltas = F.softplus(deltas + np.log(np.e - 1))
+        # deltas = F.softplus(deltas + np.log(np.e - 1))
+        deltas = torch.exp(-torch.atan(deltas))
 
         # add tails
         pad = deltas.new_ones((*deltas.shape[:-1], 2))

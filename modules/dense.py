@@ -6,7 +6,7 @@ from additive import AdditiveCoupling
 from distributions import StandardNormal
 from .base import BaseFlow
 
-from spline import RationalQuadraticSpline
+from spline import ARQ, RationalQuadraticSpline
 
 
 class DenseFlow(BaseFlow):
@@ -32,7 +32,7 @@ class DenseFlow(BaseFlow):
         nodes.append(input_node)
 
         for step in range(self.hparams.steps):
-            match self.hparams.coupling_type:
+            match self.hparams.coupling_type.lower():
                 case "affine":
                     coupling = ff.Node(
                         inputs=nodes[-1],
@@ -62,6 +62,17 @@ class DenseFlow(BaseFlow):
                             **self.hparams.coupling_args,
                         ),
                         name=f"Spline({step})"
+                    )
+                case "arq":
+                    coupling = ff.Node(
+                        inputs=nodes[-1],
+                        module_type=ARQ,
+                        module_args=dict(
+                            affine_subnet_constructor=self.configure_subnet,
+                            spline_subnet_constructor=self.configure_subnet,
+                            **self.hparams.coupling_args,
+                        ),
+                        name=f"ARQ({step})"
                     )
                 case _:
                     raise ValueError(f"Unsupported Coupling Type: {self.hparams.coupling_type}")
