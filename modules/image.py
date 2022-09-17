@@ -6,6 +6,8 @@ from additive import AdditiveCoupling
 from distributions import StandardNormal
 from .base import BaseFlow
 
+from spline import RationalQuadraticSpline
+
 
 class ImageFlow(BaseFlow):
     """
@@ -20,6 +22,7 @@ class ImageFlow(BaseFlow):
             subnet_widths=[64, 64],
             kernel_sizes=[3, 1, 3],
             coupling_type="affine",
+            coupling_args={},
             distribution="normal",
             dropout=0.0
         )
@@ -30,24 +33,36 @@ class ImageFlow(BaseFlow):
         nodes.append(input_node)
 
         for step in range(self.hparams.steps):
-            match self.hparams.coupling_type:
-                case "affine":
-                    coupling = ff.Node(
-                        inputs=nodes[-1],
-                        module_type=fm.GLOWCouplingBlock,
-                        module_args=dict(
-                            subnet_constructor=self.configure_subnet
-                        ),
-                        name=f"Affine({step})"
-                    )
+            match self.hparams.coupling_type.lower():
                 case "additive":
                     coupling = ff.Node(
                         inputs=nodes[-1],
                         module_type=AdditiveCoupling,
                         module_args=dict(
-                            subnet_constructor=self.configure_subnet
+                            subnet_constructor=self.configure_subnet,
+                            **self.hparams.coupling_args,
                         ),
-                        name=f"Additive({step})"
+                        name=f"Additive({step})",
+                    )
+                case "affine":
+                    coupling = ff.Node(
+                        inputs=nodes[-1],
+                        module_type=fm.GLOWCouplingBlock,
+                        module_args=dict(
+                            subnet_constructor=self.configure_subnet,
+                            **self.hparams.coupling_args,
+                        ),
+                        name=f"Affine({step})",
+                    )
+                case "spline":
+                    coupling = ff.Node(
+                        inputs=nodes[-1],
+                        module_type=RationalQuadraticSpline,
+                        module_args=dict(
+                            subnet_constructor=self.configure_subnet,
+                            **self.hparams.coupling_args,
+                        ),
+                        name=f"Spline({step})",
                     )
                 case _:
                     raise ValueError(f"Unsupported Coupling Type: {self.hparams.coupling_type}")

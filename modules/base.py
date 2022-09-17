@@ -37,11 +37,7 @@ class BaseFlow(lightning.LightningModule):
         z, logabsdet = self.inn.forward(x)
         assert isinstance(z, torch.Tensor)
 
-        # print(f"Jacobian Mean: {logabsdet.mean(dim=0)}")
-
         log_prob = self.distribution.log_prob(z)
-
-        # print(f"Log Prob Mean: {log_prob.mean(dim=0)}")
 
         return log_prob + logabsdet
 
@@ -135,7 +131,7 @@ class BaseFlow(lightning.LightningModule):
 
     def configure_subnet(self, in_features, out_features):
         """
-        Configure and return the subnetwork used by couplings to predict [s, t]
+        Configure and return the subnetwork used by individual inn modules to predict parameters
         """
         raise NotImplementedError
 

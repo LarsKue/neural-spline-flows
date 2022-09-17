@@ -6,7 +6,7 @@ from additive import AdditiveCoupling
 from distributions import StandardNormal
 from .base import BaseFlow
 
-from spline import ARQ, RationalQuadraticSpline
+from spline import RationalQuadraticSpline
 
 
 class DenseFlow(BaseFlow):
@@ -33,16 +33,6 @@ class DenseFlow(BaseFlow):
 
         for step in range(self.hparams.steps):
             match self.hparams.coupling_type.lower():
-                case "affine":
-                    coupling = ff.Node(
-                        inputs=nodes[-1],
-                        module_type=fm.GLOWCouplingBlock,
-                        module_args=dict(
-                            subnet_constructor=self.configure_subnet,
-                            **self.hparams.coupling_args,
-                        ),
-                        name=f"Affine({step})"
-                    )
                 case "additive":
                     coupling = ff.Node(
                         inputs=nodes[-1],
@@ -53,6 +43,16 @@ class DenseFlow(BaseFlow):
                         ),
                         name=f"Additive({step})"
                     )
+                case "affine":
+                    coupling = ff.Node(
+                        inputs=nodes[-1],
+                        module_type=fm.GLOWCouplingBlock,
+                        module_args=dict(
+                            subnet_constructor=self.configure_subnet,
+                            **self.hparams.coupling_args,
+                        ),
+                        name=f"Affine({step})"
+                    )
                 case "spline":
                     coupling = ff.Node(
                         inputs=nodes[-1],
@@ -62,17 +62,6 @@ class DenseFlow(BaseFlow):
                             **self.hparams.coupling_args,
                         ),
                         name=f"Spline({step})"
-                    )
-                case "arq":
-                    coupling = ff.Node(
-                        inputs=nodes[-1],
-                        module_type=ARQ,
-                        module_args=dict(
-                            affine_subnet_constructor=self.configure_subnet,
-                            spline_subnet_constructor=self.configure_subnet,
-                            **self.hparams.coupling_args,
-                        ),
-                        name=f"ARQ({step})"
                     )
                 case _:
                     raise ValueError(f"Unsupported Coupling Type: {self.hparams.coupling_type}")
