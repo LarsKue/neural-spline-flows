@@ -15,7 +15,7 @@ import utils
 
 def transform_spline_params(params: torch.Tensor, *, bins: int):
     """
-    Transform and constrain subnetwork outputs for use in splining
+    Transform and constrain subnetwork outputs for use in rational-quadratic splining
     :param params: unconstrained subnetwork outputs (domain half-width, bin widths, bin heights, bin deltas)
     :param bins: number of bins to use
     :return: bin edge x and y coordinates and derivatives
@@ -155,40 +155,6 @@ def rational_quadratic_spline(x: torch.Tensor, xs: torch.Tensor, ys: torch.Tenso
     log_jac = torch.log(numerator) - torch.log(denominator)
 
     return out, log_jac
-
-
-def tailed_spline(x: torch.Tensor, *, params: torch.Tensor, bins: int, spline: Callable = rational_quadratic_spline, rev: bool = False):
-    """
-    Apply the given spline inside the spline domain, with identity tails outside the spline domain
-    :param x: input tensor
-    :param params: unconstrained spline parameters
-    :param bins: number of bins to use
-    :param spline: spline function
-    :param rev: whether to run in reverse
-    :return: tuple containing the output tensor and the log jacobian determinant
-    """
-    xs, ys, deltas = transform_spline_params(params, bins=bins)
-
-    # bin edge cases are the same as in torch.searchsorted
-    inside = (xs[..., 0] < x) & (x <= xs[..., -1])
-
-    # pass inputs inside spline boundary to spline
-    spline_out, spline_log_jac = spline(x[inside], xs[inside], ys[inside], deltas[inside], rev=rev)
-
-    # identity tails
-    out = torch.clone(x)
-    # overwrite inside with spline
-    out[inside] = spline_out
-    # same for jacobian; logjac of identity is zero
-    log_jac = out.new_zeros(out.shape)
-    log_jac[inside] = spline_log_jac
-
-    log_jac_det = utils.sum_except_batch(log_jac)
-
-    if rev:
-        log_jac_det = -log_jac_det
-
-    return out, log_jac_det
 
 
 class RationalQuadraticSpline(_BaseCouplingBlock):
