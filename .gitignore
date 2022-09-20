@@ -130,3 +130,6 @@ dmypy.json
 
 # Jetbrains
 .idea/
+
+# lightning
+lightning_logs/
