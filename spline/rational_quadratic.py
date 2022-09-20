@@ -49,7 +49,9 @@ def transform_spline_params(params: torch.Tensor, *, bins: int):
     # constrain B to positive values
     # we additionally define the activation such that network output 0 leads to B = 1
     # exp + atan is more stable than softplus
-    B = torch.exp(-torch.atan(B))
+    # B = torch.exp(-torch.atan(B))
+    shift = np.log(np.e - 1)
+    B = F.softplus(B + shift)
 
     widths = F.softmax(widths, dim=-1)
     heights = F.softmax(heights, dim=-1)
@@ -69,7 +71,8 @@ def transform_spline_params(params: torch.Tensor, *, bins: int):
     ys = 2 * B * ys - B
 
     # again, constrain to positive values and network 0 -> delta = 1
-    deltas = torch.exp(-torch.atan(deltas))
+    # deltas = torch.exp(-torch.atan(deltas))
+    deltas = F.softplus(deltas + shift)
 
     # add tails
     pad = deltas.new_ones((*deltas.shape[:-1], 2))
