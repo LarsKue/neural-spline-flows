@@ -1,62 +1,39 @@
 
 import torch
-from typing import Callable
+
+from FrEIA.modules.coupling_layers import _BaseCouplingBlock
+
+import utils
 
 
-def tailed_spline(x: torch.Tensor, *, params: torch.Tensor, bins: int, spline: Callable, rev: bool = False):
-    """
-    Apply the given spline inside the spline domain, with identity tails outside the spline domain
-    :param x: input tensor
-    :param params: unconstrained spline parameters
-    :param bins: number of bins to use
-    :param spline: spline function
-    :param rev: whether to run in reverse
-    :return: tuple containing the output tensor and the log jacobian determinant
-    """
-    xs, ys, deltas = transform_spline_params(params, bins=bins)
-
-    # bin edge cases are the same as in torch.searchsorted
-    inside = (xs[..., 0] < x) & (x <= xs[..., -1])
-
-    # pass inputs inside spline boundary to spline
-    spline_out, spline_log_jac = spline(x[inside], xs[inside], ys[inside], deltas[inside], rev=rev)
-
-    # identity tails
-    out = torch.clone(x)
-    # overwrite inside with spline
-    out[inside] = spline_out
-    # same for jacobian; logjac of identity is zero
-    log_jac = out.new_zeros(out.shape)
-    log_jac[inside] = spline_log_jac
-
-    log_jac_det = utils.sum_except_batch(log_jac)
-
-    if rev:
-        log_jac_det = -log_jac_det
-
-    return out, log_jac_det
-
-from .binned import BinnedSpline
+from .base import SplineCoupling
 
 
-class TailedSpline(BinnedSpline):
-    def _spline1(self, x: torch.Tensor, x_left: torch.Tensor, x_right: torch.Tensor, y_left: torch.Tensor, y_right: torch.Tensor, *params: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
-        xs, ys, *_ = params
+class TailedSpline(SplineCoupling):
+    def __init__(self, dims_in, dims_c=None, inner: SplineCoupling = None):
+        if dims_c is None:
+            dims_c = []
+        super().__init__(dims_in, dims_c)
 
-        # TODO: make this a wrapper or something maybe
+        self.inner = inner
 
-        # bin edge cases are the same as in torch.searchsorted
-        inside = (xs[..., 0] < x) & (x <= xs[..., -1])
+    def _coupling1(self, x1, u2, rev=False):
+        params = self.subnet1(u2)
 
-        # pass inputs inside spline boundary to spline
-        spline_out, spline_log_jac = spline(x[inside], xs[inside], ys[inside], deltas[inside], rev=rev)
+        domain, other_params = torch.split(params, [...], dim=1)
 
-        # identity tails
-        out = torch.clone(x)
+        inside = ...  # x in domain
+
+        spline_out, spline_log_jac = self.inner._spline1(x1, domain, other_params)
+
+        # affine tails
+        a = ...
+        b = ...
+        out = a * x1 + b
         # overwrite inside with spline
         out[inside] = spline_out
-        # same for jacobian; logjac of identity is zero
-        log_jac = out.new_zeros(out.shape)
+        # same for jacobian
+        log_jac = a
         log_jac[inside] = spline_log_jac
 
         log_jac_det = utils.sum_except_batch(log_jac)
@@ -66,4 +43,5 @@ class TailedSpline(BinnedSpline):
 
         return out, log_jac_det
 
-
+    def _coupling2(self, x2, u1, rev=False):
+        pass
