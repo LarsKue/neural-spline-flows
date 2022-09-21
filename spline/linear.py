@@ -12,38 +12,26 @@ class LinearSpline(BinnedSpline):
         # 3.    the relative height of each bin     positive, sum to 1      #bins
         super().__init__(*args, **kwargs, bins=bins, parameter_counts=[1, bins, bins])
 
-    def _spline1(self, x: torch.Tensor, *params: torch.Tensor, rev: bool = False) -> torch.Tensor:
-        xs, ys = params
+    def _spline1(self, x: torch.Tensor, left: torch.Tensor, right: torch.Tensor, bottom: torch.Tensor, top: torch.Tensor, *params: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+        return linear_spline(x, left, right, bottom, top, rev=rev)
 
-        # find left and right bin edge indices
-        if not rev:
-            right = torch.searchsorted(xs, x[..., None])
-            left = right - 1
-        else:
-            y = x
-            right = torch.searchsorted(ys, y[..., None])
-            left = right - 1
+    def _spline2(self, x: torch.Tensor, left: torch.Tensor, right: torch.Tensor, bottom: torch.Tensor, top: torch.Tensor, *params: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+        return linear_spline(x, left, right, bottom, top, rev=rev)
 
-        # get left and right bin edge values
-        # variables are named as in the paper
-        # e.g. xk is $x^{(k)}$ and xkp is $x^{(k+1)}$
-        xk = torch.gather(xs, dim=-1, index=left).squeeze(-1)
-        xkp = torch.gather(xs, dim=-1, index=right).squeeze(-1)
-        yk = torch.gather(ys, dim=-1, index=left).squeeze(-1)
-        ykp = torch.gather(ys, dim=-1, index=right).squeeze(-1)
 
-        dx = xkp - xk
-        dy = ykp - yk
+def linear_spline(x: torch.Tensor, left: torch.Tensor, right: torch.Tensor, bottom: torch.Tensor, top: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    dx = right - left
+    dy = top - bottom
 
-        if not rev:
-            xi = (x - xk) / dx
-            out = dy / dx * xi + yk
-        else:
-            y = x
+    if not rev:
+        xi = (x - left) / dx
+        out = dy / dx * xi + bottom
+    else:
+        y = x
 
-            xi = (y - yk) * dx / dy
-            out = xi * dx + xk
+        xi = (y - bottom) * dx / dy
+        out = xi * dx + left
 
-        log_jac = torch.log(dy) - torch.log(dx)
+    log_jac = torch.log(dy) - torch.log(dx)
 
-        return out, log_jac
+    return out, log_jac
