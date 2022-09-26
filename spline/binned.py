@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -11,7 +10,18 @@ import utils
 
 
 class BinnedSpline(_BaseCouplingBlock):
-    def __init__(self, dims_in, dims_c=None, subnet_constructor: Callable = None, split_len: float | int = 0.5, bins: int = 10, parameter_counts: list[int, ...] = None):
+    """
+    Base Class for Spline Couplings
+    Splits Input into outside and inside a spline domain.
+    The spline domain is further split into a fixed number of bins.
+    Bin widths and heights are predicted by the subnetwork.
+    The subnetwork may predict additional parameters for subclasses.
+    Splining is performed by the subclass, based on the left, right, bottom and top edges for each bin.
+    Input outside the spline domain is unaltered.
+    """
+
+    def __init__(self, dims_in, dims_c=None, subnet_constructor: Callable = None, split_len: float | int = 0.5,
+                 bins: int = 10, parameter_counts: list[int, ...] = None):
         if dims_c is None:
             dims_c = []
 
@@ -24,106 +34,113 @@ class BinnedSpline(_BaseCouplingBlock):
         self.bins = bins
         self.parameter_counts = parameter_counts
 
-    def _spline1(self, x: torch.Tensor, left: torch.Tensor, right: torch.Tensor, bottom: torch.Tensor, top: torch.Tensor, *params: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    def _spline1(self,
+                 x: torch.Tensor,
+                 left: torch.Tensor,
+                 right: torch.Tensor,
+                 bottom: torch.Tensor,
+                 top: torch.Tensor,
+                 *params: torch.Tensor,
+                 rev: bool = False,
+                 ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the spline for input x within a bin with edges left, right, bottom, top
+        """
         raise NotImplementedError
 
-    def _spline2(self, x: torch.Tensor, left: torch.Tensor, right: torch.Tensor, bottom: torch.Tensor, top: torch.Tensor, *params: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    def _spline2(self,
+                 x: torch.Tensor,
+                 left: torch.Tensor,
+                 right: torch.Tensor,
+                 bottom: torch.Tensor,
+                 top: torch.Tensor,
+                 *params: torch.Tensor,
+                 rev: bool = False,
+                 ) -> tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError
+
+    def _split_params1(self, unconstrained_params: torch.Tensor) -> list[torch.Tensor]:
+        unconstrained_params = unconstrained_params.movedim(1, -1)
+
+        # move and split the parameter dimension, this simplifies some transformations
+        unconstrained_params = unconstrained_params.reshape(*unconstrained_params.shape[:-1], self.split_len1, -1)
+
+        return torch.split(unconstrained_params, self.parameter_counts, dim=-1)
+
+    def _split_params2(self, unconstrained_params: torch.Tensor) -> list[torch.Tensor]:
+        unconstrained_params = unconstrained_params.movedim(1, -1)
+
+        # move and split the parameter dimension, this simplifies some transformations
+        unconstrained_params = unconstrained_params.reshape(*unconstrained_params.shape[:-1], self.split_len2, -1)
+
+        return torch.split(unconstrained_params, self.parameter_counts, dim=-1)
+
+    def _constrain_params1(self, *params: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        domain_width, bin_widths, bin_heights, *params = params
+
+        # constrain the domain width to positive values
+        # use a shifted softplus
+        shift = np.log(np.e - 1)
+        domain_width = F.softplus(domain_width + shift)
+
+        # bin widths must be positive and sum to 1
+        bin_widths = F.softmax(bin_widths, dim=-1)
+
+        # same for the bin heights
+        bin_heights = F.softmax(bin_heights, dim=-1)
+
+        return domain_width, bin_widths, bin_heights, *params
+
+    def _constrain_params2(self, *params: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        domain_width, bin_widths, bin_heights, *params = params
+
+        # constrain the domain width to positive values
+        # use a shifted softplus
+        shift = np.log(np.e - 1)
+        domain_width = F.softplus(domain_width + shift)
+
+        # bin widths must be positive and sum to 1
+        bin_widths = F.softmax(bin_widths, dim=-1)
+
+        # same for the bin heights
+        bin_heights = F.softmax(bin_heights, dim=-1)
+
+        return domain_width, bin_widths, bin_heights, *params
 
     def _coupling1(self, x1: torch.Tensor, u2: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         unconstrained_params = self.subnet1(u2)
+        split_params = self._split_params1(unconstrained_params)
+        domain_width, bin_widths, bin_heights, *params = self._constrain_params1(*split_params)
 
-        # TODO: make tailed spline a base case and binned spline an inner variant of the tailed spline
-        #  tailed spline technically only needs an inner spline and a domain box
-        #  tails can then be affine
-        #  inner spline can get domain box from tailed spline
-
-        xs, ys = make_knots(unconstrained_params, bins=self.bins, split_len=self.split_len1)
-
-        if not rev:
-            inside = (xs[..., 0] < x1) & (x1 <= xs[..., 1])
-        else:
-            y1 = x1
-            inside = (ys[..., 0] < y1) & (y1 <= ys[..., 1])
-
-        left, right, bottom, top = make_edges(x1[inside], xs[inside], ys[inside], rev=rev)
-
-        spline_out, spline_log_jac = self._spline1(x1, left, right, bottom, top, rev=rev)
-
-        # identity tails
-        out = torch.clone(x1)
-        # overwrite inside with spline
-        out[inside] = spline_out
-        # same for jacobian; logjac of identity is zero
-        log_jac = out.new_zeros(out.shape)
-        log_jac[inside] = spline_log_jac
-
-        log_jac_det = utils.sum_except_batch(log_jac)
-
-        if rev:
-            log_jac_det = -log_jac_det
-
-        return out, log_jac_det
+        return binned_spline(x1, domain_width=domain_width, bin_widths=bin_widths, bin_heights=bin_heights,
+                             spline=self._spline1, spline_params=params, rev=rev)
 
     def _coupling2(self, x2: torch.Tensor, u1: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
         unconstrained_params = self.subnet2(u1)
+        split_params = self._split_params2(unconstrained_params)
+        domain_width, bin_widths, bin_heights, *params = self._constrain_params2(*split_params)
 
-        xs, ys = make_knots(unconstrained_params, bins=self.bins, split_len=self.split_len2)
-
-        if not rev:
-            inside = (xs[..., 0] < x2) & (x2 <= xs[..., 1])
-        else:
-            y2 = x2
-            inside = (ys[..., 0] < y2) & (y2 <= ys[..., 1])
-
-        left, right, bottom, top = make_edges(x2[inside], xs[inside], ys[inside], rev=rev)
-
-        spline_out, spline_log_jac = self._spline2(x2, left, right, bottom, top, rev=rev)
-
-        # identity tails
-        out = torch.clone(x2)
-        # overwrite inside with spline
-        out[inside] = spline_out
-        # same for jacobian; logjac of identity is zero
-        log_jac = out.new_zeros(out.shape)
-        log_jac[inside] = spline_log_jac
-
-        log_jac_det = utils.sum_except_batch(log_jac)
-
-        if rev:
-            log_jac_det = -log_jac_det
-
-        return out, log_jac_det
+        return binned_spline(x2, domain_width=domain_width, bin_widths=bin_widths, bin_heights=bin_heights,
+                             spline=self._spline2, spline_params=params, rev=rev)
 
 
-def make_knots(unconstrained_params: torch.Tensor, bins: int, split_len: int) -> tuple[torch.Tensor, torch.Tensor]:
+def make_knots(domain_width: torch.Tensor,
+               bin_widths: torch.Tensor,
+               bin_heights: torch.Tensor,
+               ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Find bin knots (x and y coordinates) from unconstrained parameter outputs
-    :param unconstrained_params: unconstrained subnetwork outputs (domain half-width, bin widths, bin heights, bin deltas)
-    :param bins: number of bins to use
-    :param split_len: split length used by the current coupling
+    Find bin knots (x and y coordinates) from constrained parameters
+    :param domain_width: half-width of the zero-centered spline box
+    :param bin_widths: relative widths of each bin
+    :param bin_heights: relative heights of each bin
     :return: tuple containing bin knot x and y coordinates
     """
-    # move and split the parameter dimension, this simplifies some transformations
-    unconstrained_params = unconstrained_params.movedim(1, -1)
-    unconstrained_params = unconstrained_params.reshape(*unconstrained_params.shape[:-1], split_len, 2 * bins + 1)
 
-    domain_width, bin_widths, bin_heights = torch.split(unconstrained_params, [1, bins, bins], dim=-1)
-
-    # constrain the domain width to positive values
-    # use a shifted softplus
-    shift = np.log(np.e - 1)
-    domain_width = F.softplus(domain_width + shift)
-
-    # bin widths must be positive and sum to 1
-    bin_widths = F.softmax(bin_widths, dim=-1)
     xs = torch.cumsum(bin_widths, dim=-1)
     pad = xs.new_zeros((*xs.shape[:-1], 1))
     xs = torch.cat((pad, xs), dim=-1)
     xs = 2 * domain_width * xs - domain_width
 
-    # same for the bin heights
-    bin_heights = F.softmax(bin_heights, dim=-1)
     ys = torch.cumsum(bin_heights, dim=-1)
     pad = ys.new_zeros((*ys.shape[:-1], 1))
     ys = torch.cat((pad, ys), dim=-1)
@@ -132,7 +149,11 @@ def make_knots(unconstrained_params: torch.Tensor, bins: int, split_len: int) ->
     return xs, ys
 
 
-def make_edges(x: torch.Tensor, xs: torch.Tensor, ys: torch.Tensor, rev: bool = False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+def make_edges(x: torch.Tensor,
+               xs: torch.Tensor,
+               ys: torch.Tensor,
+               rev: bool = False,
+               ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Find bin edges for the given input values and bin knots
     :param x: input tensor of shape (batch_size, ...)
@@ -156,3 +177,40 @@ def make_edges(x: torch.Tensor, xs: torch.Tensor, ys: torch.Tensor, rev: bool = 
     top_edge = torch.gather(ys, dim=-1, index=upper).squeeze(-1)
 
     return left_edge, right_edge, bottom_edge, top_edge
+
+
+def binned_spline(x: torch.Tensor,
+                  *,
+                  domain_width: torch.Tensor,
+                  bin_widths: torch.Tensor,
+                  bin_heights: torch.Tensor,
+                  spline: Callable,
+                  spline_params: tuple = (),
+                  rev: bool = False,
+                  ) -> tuple[torch.Tensor, torch.Tensor]:
+    xs, ys = make_knots(domain_width, bin_widths, bin_heights)
+
+    if not rev:
+        inside = (xs[..., 0] < x) & (x <= xs[..., 1])
+    else:
+        y = x
+        inside = (ys[..., 0] < y) & (y <= ys[..., 1])
+
+    left, right, bottom, top = make_edges(x[inside], xs[inside], ys[inside], rev=rev)
+
+    spline_out, spline_log_jac = spline(x, left, right, bottom, top, *spline_params, rev=rev)
+
+    # identity tails
+    out = torch.clone(x)
+    # overwrite inside with spline
+    out[inside] = spline_out
+    # same for jacobian; logjac of identity is zero
+    log_jac = out.new_zeros(out.shape)
+    log_jac[inside] = spline_log_jac
+
+    log_jac_det = utils.sum_except_batch(log_jac)
+
+    if rev:
+        log_jac_det = -log_jac_det
+
+    return out, log_jac_det
