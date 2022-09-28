@@ -6,8 +6,6 @@ from additive import AdditiveCoupling
 from distributions import StandardNormal
 from .base import BaseFlow
 
-from spline import RationalQuadraticSpline
-
 
 class DenseFlow(BaseFlow):
     """
@@ -53,10 +51,20 @@ class DenseFlow(BaseFlow):
                         ),
                         name=f"Affine({step})"
                     )
-                case "spline":
+                case "linear_spline":
                     coupling = ff.Node(
                         inputs=nodes[-1],
-                        module_type=RationalQuadraticSpline,
+                        module_type=fm.LinearSpline,
+                        module_args=dict(
+                            subnet_constructor=self.configure_subnet,
+                            **self.hparams.coupling_args,
+                        ),
+                        name=f"Spline({step})"
+                    )
+                case "rq_spline":
+                    coupling = ff.Node(
+                        inputs=nodes[-1],
+                        module_type=fm.RationalQuadraticSpline,
                         module_args=dict(
                             subnet_constructor=self.configure_subnet,
                             **self.hparams.coupling_args,

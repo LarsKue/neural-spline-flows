@@ -2,8 +2,6 @@
 import FrEIA.framework as ff
 import FrEIA.modules as fm
 
-from spline import RationalQuadraticSpline
-
 from .dense import DenseFlow
 from .image import ImageFlow
 
@@ -38,7 +36,7 @@ class DenseARQ(DenseFlow):
             for i in range(self.hparams.spline_steps):
                 node = ff.Node(
                     inputs=nodes[-1],
-                    module_type=RationalQuadraticSpline,
+                    module_type=fm.RationalQuadraticSpline,
                     module_args=dict(
                         subnet_constructor=self.configure_subnet,
                         **self.hparams.spline_args,
@@ -84,7 +82,7 @@ class ImageARQ(ImageFlow):
             for i in range(self.hparams.spline_steps):
                 node = ff.Node(
                     inputs=nodes[-1],
-                    module_type=RationalQuadraticSpline,
+                    module_type=fm.RationalQuadraticSpline,
                     module_args=dict(
                         subnet_constructor=self.configure_subnet,
                         **self.hparams.spline_args,
