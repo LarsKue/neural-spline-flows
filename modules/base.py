@@ -44,6 +44,7 @@ class BaseFlow(lightning.LightningModule):
     def generate(self, shape=torch.Size((1,)), temperature=1.0):
         """ Generate a number of samples by sampling randomly from the latent distribution """
         z = temperature * self.distribution.sample(shape)
+        z = z.to(self.device)
         x, _ = self.inn.forward(z, rev=True)
 
         return x
